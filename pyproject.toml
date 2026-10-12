@@ -1,0 +1,25 @@
+[project]
+name = "langid-eval"
+version = "0.1.0"
+description = "Tuneable fuzzy matching for language identification evaluation"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "langcodes>=3.5.1",
+    "pytest>=9.1.1",
+]
+
+[project.scripts]
+langid-eval = "langid_eval:main"
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
