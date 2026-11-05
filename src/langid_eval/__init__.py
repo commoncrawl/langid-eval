@@ -1,5 +1,6 @@
-import argparse
+"""Tuneable fuzzy matching for evaluating language identification."""
 
+import argparse
 from .language_stats import LangStats
 from .evaluator import LangIdEval, tag_match, closest_match_with_caching
 
@@ -21,7 +22,22 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    # an example of usage: read in gold and predicted labels and write classification report
+    """Print a report for fuzzy evaluation of language identification predictions.
+
+    This is intended as an example of usage. See README for further information.
+
+    Command line arguments:
+        golds_file: Path to file containing gold language labels, one per line.
+        preds_file: Path to file containing predicted language labels, one per line.
+        supported_langs_file (optional): Path to file of language labels supported
+            by the LID model, one per line. Results are filtered to these languages.
+
+    Returns
+    -------
+        None (prints a classification report to stdout)
+
+
+    """
     args = parse_args()
     with open(args.golds_file) as f, open(args.preds_file) as g:
         golds = [x.strip() for x in f.readlines()]

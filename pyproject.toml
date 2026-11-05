@@ -23,3 +23,9 @@ testpaths = ["tests"]
 dev = [
     "pytest>=9.1.1",
 ]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "D"]   # pycodestyle errors/warnings, pyflakes, pydocstyle
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
