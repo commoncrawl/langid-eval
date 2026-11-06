@@ -1,3 +1,4 @@
+"""Calculate evaluation statistics for gold language classes."""
 from collections import Counter
 from dataclasses import dataclass, field
 from statistics import fmean
@@ -7,7 +8,31 @@ from typing import Sequence
 def average_lang_stats(
     metric: str, stats: Sequence[LangStats], average: str = "macro"
 ) -> float:
-    """Helper to calculate different averages for language-level statistics"""
+    """Calculate various averages for language-level statistics.
+
+    Parameters
+    ----------
+    metric : str
+        Name of the metric to average ("precision", "recall", "f1", or "fpr").
+        Must match a LangStats attribute; for micro averaging, only these four
+        are supported.
+    stats : Sequence[LangStats]
+        A sequence of LangStats objects with information about gold language
+        labels.
+    average : str, optional
+        Type of average to calculate ("macro", "micro", "weighted"), by default
+        "macro".
+
+    Returns
+    -------
+    float
+        The requested type of average for the requested metric.
+
+    Raises
+    ------
+    NotImplementedError
+        If an unsupported type of average is given.
+    """
     if average == "macro":
         return fmean([getattr(s, metric) for s in stats])
     elif average == "weighted":
@@ -37,7 +62,41 @@ def average_lang_stats(
 
 @dataclass
 class LangStats:
-    """Store information and statistics about a particular gold language label"""
+    """Counts and metrics for a single gold language label.
+
+    Counts are filled in by the evaluator, then metrics are set with the
+    `calc_*` methods. All counts and metrics default to zero until then.
+
+    Attributes
+    ----------
+    gold_label : str
+        The gold language label.
+    gold_count : int
+        Number of items with the gold label (the support).
+    true_positive_count : int
+        Count of items where the predicted label matched this gold label.
+    true_negative_count : int
+        Count of items with a different gold label that were not counted as
+        false positives for this gold label.
+    false_positive_count : int
+        Count of wrong predictions on other items whose closest gold label
+        (within the evaluator's `max_tag_distance`) is this gold label.
+    false_negative_count : int
+        Count of items with this gold label but a different predicted label.
+    matching_preds : Counter[str]
+        Predicted labels that matched this gold label (may differ from
+        `gold_label`).
+    wrong_preds : Counter[str]
+        Non-matching predicted labels for items with this gold label.
+    precision : float
+        Language class precision (see `calc_precision`).
+    recall : float
+        Language class recall (see `calc_recall`).
+    f1 : float
+        Language class F1 score (see `calc_f1`).
+    fpr : float
+        Language class false positive rate (see `calc_fpr`).
+    """
 
     gold_label: str
     gold_count: int = field(default=0)
@@ -53,7 +112,7 @@ class LangStats:
     fpr: float = field(default=0.0)
 
     def calc_precision(self) -> float:
-        """Precision = true positives / (true positives + false positives)"""
+        """Calculate precision = true positives / (true positives + false positives)."""
         try:
             return self.true_positive_count / (
                 self.true_positive_count + self.false_positive_count
@@ -62,21 +121,24 @@ class LangStats:
             return 0.0
 
     def calc_recall(self) -> float:
-        """Calculates recall  = true positives / (true positives + false negatives)"""
-        # zero division error would indicate something more fundametally wrong
+        """Calculate recall = true positives / (true positives + false negatives).
+
+        Raises `ZeroDivisionError` if `gold_count` is zero.
+        """
+        # zero division error would indicate something more fundamentally wrong
         return self.true_positive_count / (
             self.true_positive_count + self.false_negative_count
         )
 
     def calc_f1(self) -> float:
-        """Calcualtes F1, returning zero if precision and recall are both zero"""
+        """Calculate F1, returning zero if precision and recall are both zero."""
         try:
             return 2 * (self.precision * self.recall) / (self.precision + self.recall)
         except ZeroDivisionError:
             return 0.0
 
     def calc_fpr(self) -> float:
-        """Calculates false positive rate = false positives / (false positives + true negatives)"""
+        """Calculate false positive rate = FP / (FP + TN)."""
         try:
             return self.false_positive_count / (
                 self.false_positive_count + self.true_negative_count
