@@ -8,6 +8,7 @@ __all__ = ["LangStats", "LangIdEval", "tag_match", "closest_match_with_caching"]
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for `main`."""
     parser = argparse.ArgumentParser()
     parser.add_argument("golds_file", help="file containing gold labels, one per line")
     parser.add_argument(
@@ -25,18 +26,14 @@ def main() -> None:
     """Print a report for fuzzy evaluation of language identification predictions.
 
     This is intended as an example of usage. See README for further information.
+    Reads these command-line arguments:
 
-    Command line arguments:
-        golds_file: Path to file containing gold language labels, one per line.
-        preds_file: Path to file containing predicted language labels, one per line.
-        supported_langs_file (optional): Path to file of language labels supported
-            by the LID model, one per line. Results are filtered to these languages.
-
-    Returns
-    -------
-        None (prints a classification report to stdout)
-
-
+    - `golds_file`: path to file containing gold language labels, one per line.
+    - `preds_file`: path to file containing predicted language labels, one per
+      line.
+    - `--supported_langs_file`, `-s` (optional): path to file of language
+      labels supported by the LID model, one per line. Results are filtered
+      to these languages.
     """
     args = parse_args()
     with open(args.golds_file) as f, open(args.preds_file) as g:

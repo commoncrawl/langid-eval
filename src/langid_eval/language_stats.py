@@ -1,4 +1,5 @@
 """Calculate evaluation statistics for gold language classes."""
+
 from collections import Counter
 from dataclasses import dataclass, field
 from statistics import fmean
@@ -20,8 +21,8 @@ def average_lang_stats(
         A sequence of LangStats objects with information about gold language
         labels.
     average : str, optional
-        Type of average to calculate ("macro", "micro", "weighted"), by default
-        "macro".
+        Type of average to calculate ("macro", "micro", "weighted"). Defaults
+        to "macro".
 
     Returns
     -------
@@ -123,7 +124,10 @@ class LangStats:
     def calc_recall(self) -> float:
         """Calculate recall = true positives / (true positives + false negatives).
 
-        Raises `ZeroDivisionError` if `gold_count` is zero.
+        Raises
+        ------
+        ZeroDivisionError
+            If `gold_count` is zero.
         """
         # zero division error would indicate something more fundamentally wrong
         return self.true_positive_count / (
