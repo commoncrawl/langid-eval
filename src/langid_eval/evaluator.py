@@ -1,3 +1,5 @@
+"""Define matches and provide language identification evaluation."""
+
 from functools import lru_cache
 from langcodes import tag_distance, closest_match, Language
 from typing import List, Literal, Sequence, Tuple, overload
@@ -10,8 +12,27 @@ from .report import build_report_dict, format_report
 def tag_match(
     desired: str, available: str, ignore_script: bool, max_tag_distance: int
 ) -> bool:
-    """returns a boolean signifying if the two language tags are close enough to be considered the same language"""
-    # handle case of `und_<Script>` being expanded to most common language in script, then marked as correct
+    """Check if two language tags are close enough to count as the same language.
+
+    Parameters
+    ----------
+    desired : str
+        The language which needs a match.
+    available : str
+        The language proposed as a match.
+    ignore_script : bool
+        If True, ignore script subtags when matching.
+    max_tag_distance : int
+        The maximum distance between languages allowed for matches.
+
+    Returns
+    -------
+    bool
+        True if the tags are within `max_tag_distance` of each other. Always
+        False if only one of them is undetermined (`und`).
+    """
+    # handle case of `und_<Script>` being expanded to most common language for that
+    # script, which is then marked as correct
     if desired.startswith("und") != available.startswith("und"):
         return False
     return tag_distance(desired, available, ignore_script) <= max_tag_distance
@@ -24,7 +45,26 @@ def closest_match_with_caching(
     max_distance: int,
     ignore_script: bool,
 ) -> Tuple[str, int]:
-    """Calculate closest_match from langcodes, storing previous results in the provided local cache"""
+    """Calculate `closest_match` from `langcodes`, storing prior results in `cache`.
+
+    Parameters
+    ----------
+    desired_language : str | Language
+        The language which needs a match.
+    supported_languages : Sequence[str]
+        The languages available as matches.
+    cache : dict[str, Tuple[str, int]]
+        A cache to store pre-computed matches and their distances (changed in place).
+    max_distance : int
+        The maximum distance between languages allowed for matches.
+    ignore_script : bool
+        If True, ignore script subtags when matching.
+
+    Returns
+    -------
+    Tuple[str, int]
+        The closest match and distance or ("und", 1000) if no match.
+    """
     if not isinstance(desired_language, str):
         desired_language = str(desired_language)  # in case it's Language
     if desired_language.startswith("und"):
@@ -43,18 +83,44 @@ def closest_match_with_caching(
 
 
 class LangIdEval:
+    """Evaluate language identification with fuzzy matching of language tags.
+
+    Tags match if their `langcodes` tag distance is at most `max_tag_distance`.
+
+    Parameters
+    ----------
+    golds : List[str]
+        Gold language labels.
+    preds : List[str]
+        Predicted language labels.
+    ignore_script : bool, optional
+        Ignore script subtags when matching. Defaults to True.
+    max_tag_distance : int, optional
+        Maximum tag distance for a match. Defaults to 5 ("a significant but
+        unproblematic regional difference").
+    supported_languages : Sequence[str], optional
+        Languages the model supports. If given, metrics can be calculated for
+        these languages only with `supported_languages_only=True`. Defaults to ().
+
+    Raises
+    ------
+    ValueError
+        If `golds` and `preds` have different lengths.
+    """
+
     def __init__(
         self,
         golds: List[str],
         preds: List[str],
         ignore_script: bool = True,
-        max_tag_distance: int = 5,  # from langcodes: "a significant but unproblematic regional difference"
+        # from langcodes: "a significant but unproblematic regional difference"
+        max_tag_distance: int = 5,
         supported_languages: Sequence[str] = (),
     ) -> None:
         self.ignore_script = ignore_script
         self.max_tag_distance = max_tag_distance
         self.supported_languages = supported_languages
-        # need to calculate full and filtered lookups separately because need separate false positives
+        # calculate both full and filtered lookups because need separate false positives
         self.stats_lookup = self._build_stats_lookup(golds, preds)
         self.supported_stats_lookup = None
         if self.supported_languages:
@@ -66,7 +132,20 @@ class LangIdEval:
     def _build_stats_lookup(
         self, golds: List[str], preds: List[str]
     ) -> dict[str, LangStats]:
-        """build look-up for language-level statistics, given a list of gold labels and predictions"""
+        """Build look-up for language-level statistics from gold and predicted labels.
+
+        Parameters
+        ----------
+        golds : List[str]
+            List of gold language labels.
+        preds : List[str]
+            List of predicted language labels.
+
+        Returns
+        -------
+        dict[str, LangStats]
+            Per-language statistics keyed by gold label.
+        """
         # initialise lookup with gold labels as keys
         lookup: dict[str, LangStats] = dict()
         for g in golds:
@@ -84,7 +163,7 @@ class LangIdEval:
                 lookup[g].true_positive_count += 1
                 lookup[g].matching_preds.update([p])
 
-            # false positive: find gold label closest to prediction, up to a max tag distance
+            # false positive: find gold closest to prediction, up to a max tag distance
             # this approach relies heavily on langcodes' idea of closeness
             else:
                 closest_gold, dist = closest_match_with_caching(
@@ -101,14 +180,15 @@ class LangIdEval:
         # iterate over stats for each gold class to calculate true and false negatives
         n_items = len(golds)
         for stats in lookup.values():
-            # true negatives: (total overall) - (total in class) - (times it shouldn't have predicted)
+            # true negatives:
+            # (total overall) - (total in class) - (times it shouldn't have predicted)
             stats.true_negative_count = (
                 n_items - stats.gold_count - stats.false_positive_count
             )
             # false negatives: (total in class) - (times model was right)
             stats.false_negative_count = stats.gold_count - stats.true_positive_count
 
-        # counts are done. now update lookup with precision, recall, F1 and FPR for each entry
+        # counts are done, now update each lookup entry with summary statistics
         for stats in lookup.values():
             stats.precision = stats.calc_precision()
             stats.recall = stats.calc_recall()
@@ -119,12 +199,25 @@ class LangIdEval:
     def _filter_to_supported(
         self, golds: List[str], preds: List[str]
     ) -> tuple[List[str], List[str]]:
-        """Filter results to only those where the gold label is sufficiently close to one of the supported languages"""
+        """Filter results to those where the gold is close to a supported language.
+
+        Parameters
+        ----------
+        golds : List[str]
+            List of gold language labels.
+        preds : List[str]
+            List of predicted language labels.
+
+        Returns
+        -------
+        tuple[List[str], List[str]]
+            Equal-length lists of filtered gold and predicted labels.
+        """
         filtered_golds, filtered_preds = [], []
         # local to this call, unlike lru_cache
         closest_match_cache: dict[str, Tuple[str, int]] = dict()
         for g, p in zip(golds, preds, strict=True):
-            # logic here: we only want gold labels with a match in the supported languages
+            # logic here: we only want gold labels with a supported match
             closest_supported, dist = closest_match_with_caching(
                 g,
                 self.supported_languages,
@@ -145,7 +238,34 @@ class LangIdEval:
         by_class: bool,
         supported_languages_only: bool,
     ) -> dict[str, float] | float:
-        """Resolve the metric to return based on the selected options"""
+        """Resolve the metric to return.
+
+        Parameters
+        ----------
+        metric : str
+            One of "precision", "recall", "f1" or "fpr".
+        average : str
+            Type of average ("macro", "micro", or "weighted").
+        by_class : bool
+            Give metrics by class rather than overall.
+        supported_languages_only : bool
+            Use only items whose gold label matches a supported language.
+            Requires `supported_languages` at construction.
+
+        Returns
+        -------
+        dict[str, float] | float
+            Metric by class as a dict, or metric calculated overall.
+
+        Raises
+        ------
+        ValueError
+            If `supported_languages_only` is True but no `supported_languages`
+            were given when constructing `LangIdEval`.
+        NotImplementedError
+            If `by_class` is False and `average` is not "macro", "micro" or
+            "weighted".
+        """
         # returning stats by class means that no average need be calculated
         if supported_languages_only:
             if self.supported_stats_lookup is None:
@@ -183,7 +303,32 @@ class LangIdEval:
         by_class: bool = False,
         supported_languages_only: bool = False,
     ) -> dict[str, float] | float:
-        """Return precision, either by class or averaged"""
+        """Return precision, either by class or averaged.
+
+        Parameters
+        ----------
+        average : str, optional
+            Type of average ("macro", "micro", or "weighted"). Defaults to "macro".
+        by_class : bool, optional
+            Give metrics by class rather than overall. Defaults to False.
+        supported_languages_only : bool, optional
+            Use only items whose gold label matches a supported language.
+            Requires `supported_languages` at construction. Defaults to False.
+
+        Returns
+        -------
+        dict[str, float] | float
+            Precision by class as a dict or overall precision.
+
+        Raises
+        ------
+        ValueError
+            If `supported_languages_only` is True but no `supported_languages`
+            were given when constructing `LangIdEval`.
+        NotImplementedError
+            If `by_class` is False and `average` is not "macro", "micro" or
+            "weighted".
+        """
         return self._compute_metric(
             "precision", average, by_class, supported_languages_only
         )
@@ -211,7 +356,32 @@ class LangIdEval:
         by_class: bool = False,
         supported_languages_only: bool = False,
     ) -> dict[str, float] | float:
-        """Return recall, either by class or averaged"""
+        """Return recall, either by class or averaged.
+
+        Parameters
+        ----------
+        average : str, optional
+            Type of average ("macro", "micro", or "weighted"). Defaults to "macro".
+        by_class : bool, optional
+            Give metrics by class rather than overall. Defaults to False.
+        supported_languages_only : bool, optional
+            Use only items whose gold label matches a supported language.
+            Requires `supported_languages` at construction. Defaults to False.
+
+        Returns
+        -------
+        dict[str, float] | float
+            Recall by class as a dict, or overall recall.
+
+        Raises
+        ------
+        ValueError
+            If `supported_languages_only` is True but no `supported_languages`
+            were given when constructing `LangIdEval`.
+        NotImplementedError
+            If `by_class` is False and `average` is not "macro", "micro" or
+            "weighted".
+        """
         return self._compute_metric(
             "recall", average, by_class, supported_languages_only
         )
@@ -239,7 +409,32 @@ class LangIdEval:
         by_class: bool = False,
         supported_languages_only: bool = False,
     ) -> dict[str, float] | float:
-        """Return F1 score, either by class or averaged"""
+        """Return F1 score, either by class or averaged.
+
+        Parameters
+        ----------
+        average : str, optional
+            Type of average ("macro", "micro", or "weighted"). Defaults to "macro".
+        by_class : bool, optional
+            Give metrics by class rather than overall. Defaults to False.
+        supported_languages_only : bool, optional
+            Use only items whose gold label matches a supported language.
+            Requires `supported_languages` at construction. Defaults to False.
+
+        Returns
+        -------
+        dict[str, float] | float
+            F1 by class as a dict, or overall F1.
+
+        Raises
+        ------
+        ValueError
+            If `supported_languages_only` is True but no `supported_languages`
+            were given when constructing `LangIdEval`.
+        NotImplementedError
+            If `by_class` is False and `average` is not "macro", "micro" or
+            "weighted".
+        """
         return self._compute_metric("f1", average, by_class, supported_languages_only)
 
     @overload
@@ -265,7 +460,32 @@ class LangIdEval:
         by_class: bool = False,
         supported_languages_only: bool = False,
     ) -> dict[str, float] | float:
-        """Return false positive rate, either by class or averaged"""
+        """Return false positive rate, either by class or averaged.
+
+        Parameters
+        ----------
+        average : str, optional
+            Type of average ("macro", "micro", or "weighted"). Defaults to "macro".
+        by_class : bool, optional
+            Give metrics by class rather than overall. Defaults to False.
+        supported_languages_only : bool, optional
+            Use only items whose gold label matches a supported language.
+            Requires `supported_languages` at construction. Defaults to False.
+
+        Returns
+        -------
+        dict[str, float] | float
+            FPR by class as a dict, or overall FPR.
+
+        Raises
+        ------
+        ValueError
+            If `supported_languages_only` is True but no `supported_languages`
+            were given when constructing `LangIdEval`.
+        NotImplementedError
+            If `by_class` is False and `average` is not "macro", "micro" or
+            "weighted".
+        """
         return self._compute_metric("fpr", average, by_class, supported_languages_only)
 
     @overload
@@ -291,7 +511,31 @@ class LangIdEval:
         output_dict: bool = False,
         digits: int = 4,
     ) -> dict[str, dict[str, float]] | str:
-        """Build a report showing the main metrics per class and return either as dict or as printable report"""
+        """Build a report giving the main metrics per class.
+
+        Parameters
+        ----------
+        supported_languages_only : bool, optional
+            Use only items whose gold label matches a supported language.
+            Requires `supported_languages` at construction. Defaults to False.
+        output_dict : bool, optional
+            Return the report as a dict instead of a formatted string.
+            Defaults to False.
+        digits : int, optional
+            Decimal places in the string report. Ignored if `output_dict` is
+            True. Defaults to 4.
+
+        Returns
+        -------
+        dict[str, dict[str, float]] | str
+            sklearn-style classification report.
+
+        Raises
+        ------
+        ValueError
+            If `supported_languages_only` is True but no `supported_languages`
+            were given when constructing `LangIdEval`.
+        """
         lookup = (
             self.supported_stats_lookup
             if supported_languages_only
