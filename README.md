@@ -78,7 +78,7 @@ Full parameter details are in the docstrings, e.g. `help(LangIdEval.f1)`.
 | :--- | :---------- |
 | `LangIdEval(golds, preds, ignore_script=True, max_tag_distance=5, supported_languages=())` | Evaluate predicted labels against gold labels. See [How matching works](#how-matching-works). |
 | `.precision()`, `.recall()`, `.f1()`, `.fpr()` | Overall metric (`average="macro"`, `"micro"` or `"weighted"`) or per language (`by_class=True`). Use `supported_languages_only=True` to evaluate on supported languages only. |
-| `.classification_report()` | sklearn-style per-language report, as a string or a dict (`output_dict=True`). |
+| `.classification_report(supported_languages_only=False, output_dict=False, digits=4)` | sklearn-style per-language report, as a string or a dict (`output_dict=True`). |
 
 ## Citation
 
